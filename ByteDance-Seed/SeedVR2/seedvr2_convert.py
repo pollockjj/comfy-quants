@@ -18,6 +18,9 @@ Precisions:
                                 input/output projections, text/embedding input layers,
                                 tensorcore-ineligible shapes, and the model's last block
                                 stay float16; everything else -> float16
+  mxfp8                         eligible 2D .weight tensors -> TensorCoreMXFP8Layout; high-risk
+                                input/output projections, text/embedding input layers,
+                                and the model's last block stay float16; everything else -> float16
 
 Examples:
   # 3B DiT -> fp16 and fp8, conditioning baked in (one load serves both jobs)
@@ -76,12 +79,14 @@ from safetensors.torch import save_file
 FP8 = torch.float8_e4m3fn
 NVFP4_LAYOUT = "TensorCoreNVFP4Layout"
 NVFP4_ALIGNMENT = 32
+MXFP8_LAYOUT = "TensorCoreMXFP8Layout"
 NVFP4_HIGH_RISK_PREFIXES = (
     "emb_in.",
     "txt_in.",
     "vid_in.",
     "vid_out.",
 )
+MXFP8_HIGH_RISK_PREFIXES = NVFP4_HIGH_RISK_PREFIXES
 
 
 def sha256(path):
@@ -140,6 +145,16 @@ def should_quantize_nvfp4(k, v, last_block_prefix):
     return nvfp4_tensorcore_eligible(v)
 
 
+def should_quantize_mxfp8(k, v, last_block_prefix):
+    if not k.endswith(".weight") or v.dim() != 2:
+        return False
+    if last_block_prefix and k.startswith(last_block_prefix):
+        return False
+    if k.startswith(MXFP8_HIGH_RISK_PREFIXES):
+        return False
+    return True
+
+
 def quantize_nvfp4_weight(k, v):
     try:
         from comfy_kitchen.tensor import QuantizedTensor
@@ -153,12 +168,28 @@ def quantize_nvfp4_weight(k, v):
     return tensors
 
 
+def quantize_mxfp8_weight(k, v):
+    try:
+        from comfy_kitchen.tensor import QuantizedTensor
+    except ImportError as e:
+        raise SystemExit("mxfp8 precision requires comfy-kitchen") from e
+
+    base = k[:-len(".weight")]
+    qt = QuantizedTensor.from_float(v.contiguous(), MXFP8_LAYOUT)
+    tensors = qt.state_dict(f"{base}.weight")
+    tensors[f"{base}.comfy_quant"] = comfy_quant_tensor("mxfp8")
+    return tensors
+
+
 def cast(sd, precision):
     out = {}
     nvfp4_quantized = 0
     nvfp4_kept_fp16 = 0
     nvfp4_kept_policy = 0
     nvfp4_kept_shape = 0
+    mxfp8_quantized = 0
+    mxfp8_kept_fp16 = 0
+    mxfp8_kept_policy = 0
     last_block_prefix = detect_last_block_prefix(sd)
     for k, v in sd.items():
         if not torch.is_tensor(v):
@@ -183,6 +214,18 @@ def cast(sd, precision):
                         nvfp4_kept_policy += 1
                     elif k.startswith(NVFP4_HIGH_RISK_PREFIXES):
                         nvfp4_kept_policy += 1
+        elif precision == "mxfp8":
+            if should_quantize_mxfp8(k, v, last_block_prefix):
+                out.update(quantize_mxfp8_weight(k, v))
+                mxfp8_quantized += 1
+            else:
+                out[k] = v.to(torch.float16)
+                mxfp8_kept_fp16 += 1
+                if k.endswith(".weight") and v.dim() == 2:
+                    if last_block_prefix and k.startswith(last_block_prefix):
+                        mxfp8_kept_policy += 1
+                    elif k.startswith(MXFP8_HIGH_RISK_PREFIXES):
+                        mxfp8_kept_policy += 1
         else:
             raise SystemExit(f"unknown precision: {precision}")
     if precision == "nvfp4":
@@ -190,6 +233,11 @@ def cast(sd, precision):
             f"nvfp4 quantized_weights={nvfp4_quantized} kept_fp16={nvfp4_kept_fp16} "
             f"kept_policy={nvfp4_kept_policy} kept_shape={nvfp4_kept_shape} "
             f"last_block={last_block_prefix or 'none'}"
+        )
+    if precision == "mxfp8":
+        print(
+            f"mxfp8 quantized_weights={mxfp8_quantized} kept_fp16={mxfp8_kept_fp16} "
+            f"kept_policy={mxfp8_kept_policy} last_block={last_block_prefix or 'none'}"
         )
     return out
 
