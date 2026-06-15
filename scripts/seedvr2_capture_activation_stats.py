@@ -129,7 +129,11 @@ def _register_hooks(model_patcher, targets: dict[str, tuple[int, int]], accumula
 def _execute_prompt(prompt: dict, outputs: list[str]):
     import execution
 
-    executor = execution.PromptExecutor(_ServerStub(), cache_type=execution.CacheType.NONE)
+    executor = execution.PromptExecutor(
+        _ServerStub(),
+        cache_type=execution.CacheType.NONE,
+        cache_args={"ram": 16.0, "ram_inactive": 8.0},
+    )
     executor.execute(prompt, "seedvr2-int4-calibration", extra_data={}, execute_outputs=outputs)
     if not executor.success:
         raise RuntimeError(f"ComfyUI prompt execution failed: {executor.status_messages}")
@@ -170,7 +174,8 @@ def main() -> int:
 
     folder_paths.set_output_directory(str(args.out.parent / "comfy_output"))
     folder_paths.set_temp_directory(str(args.out.parent / "comfy_temp"))
-    asyncio.run(nodes.init_extra_nodes(init_custom_nodes=False, init_api_nodes=False))
+    asyncio.run(nodes.load_custom_node(str(comfy_root / "comfy_extras/nodes_post_processing.py"), module_parent="comfy_extras"))
+    asyncio.run(nodes.load_custom_node(str(comfy_root / "comfy_extras/nodes_seedvr.py"), module_parent="comfy_extras"))
 
     original_load_unet = nodes.UNETLoader.load_unet
     accumulators: dict[str, _OnlineAmax] = {}
