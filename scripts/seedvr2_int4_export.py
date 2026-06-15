@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""SeedVR2 INT4 (SVDQuant W4A4) data-free export for native ComfyUI.
+"""SeedVR2 INT4 (SVDQuant W4A4) export for native ComfyUI.
 
 Quantizes every tile-packable 2D Linear weight to INT4 SVDQuant W4A4 via the
-calibration-free natural_svdquant path (identity smoothing, zero low-rank),
-then tile-packs into comfy-kitchen's kitchen_tile_packed_w4a4 layout and writes
-one ComfyUI-loadable checkpoint.
+natural_svdquant path, then tile-packs into comfy-kitchen's
+kitchen_tile_packed_w4a4 layout and writes one ComfyUI-loadable checkpoint.
+With ``--calibrated``, per-layer activation stats drive non-identity smoothing
+and nonzero low-rank tensors. The calibrated default rank is 128; the data-free
+default remains 32 for compatibility with the original inert-low-rank probe.
 
 Keep-high policy mirrors the SeedVR2 fp8/nvfp4 legs: the input/output projections
 that cannot tile-pack (vid_in.proj K%64!=0, vid_out.proj N%128!=0) stay fp16, the
@@ -47,6 +49,8 @@ from comfy_quants.backends.int4_kitchen_export import (  # noqa: E402
 )
 
 NAT_KEYS = ("weight", "weight_scale", "smooth_factor", "proj_down", "proj_up")
+DATA_FREE_DEFAULT_RANK = 32
+CALIBRATED_DEFAULT_RANK = 128
 
 
 def should_quantize(key, shape):
@@ -62,7 +66,12 @@ def main():
     ap = argparse.ArgumentParser(description="Export a SeedVR2 INT4 SVDQuant W4A4 checkpoint.")
     ap.add_argument("--src", required=True, help="SeedVR2 fp16/bf16 safetensors with conditioning baked")
     ap.add_argument("--out", required=True)
-    ap.add_argument("--rank", type=int, default=32)
+    ap.add_argument(
+        "--rank",
+        type=int,
+        default=None,
+        help="low-rank rank; defaults to 128 with --calibrated and 32 without calibration",
+    )
     ap.add_argument("--activation-stats", help="SeedVR2 per-linear activation stats JSON for calibrated export")
     ap.add_argument("--calibrated", action="store_true", help="Use calibrated SVDQuant instead of data-free natural SVDQuant")
     ap.add_argument(
@@ -78,6 +87,11 @@ def main():
 
     if args.calibrated and not args.activation_stats:
         raise SystemExit("--calibrated requires --activation-stats")
+    rank = int(args.rank) if args.rank is not None else (
+        CALIBRATED_DEFAULT_RANK if args.calibrated else DATA_FREE_DEFAULT_RANK
+    )
+    if rank <= 0:
+        raise SystemExit("--rank must be positive")
     activation_stats = load_activation_stats_map(args.activation_stats, device="cpu") if args.activation_stats else {}
 
     f = safe_open(args.src, framework="pt", device="cpu")
@@ -95,7 +109,7 @@ def main():
                 nat = quantize_linear_weight_to_calibrated_natural_svdquant(
                     weight,
                     activation_stats=layer_stats,
-                    rank=args.rank,
+                    rank=rank,
                     group_size=KITCHEN_GROUP_SIZE,
                     scale_dtype=args.scale_dtype,
                 ).to_dict()
@@ -103,7 +117,7 @@ def main():
                     nat["proj_down"] = fold_proj_down_for_raw_branch(nat["proj_down"], nat["smooth_factor"])
             else:
                 nat = quantize_linear_weight_to_natural_svdquant(
-                    weight, rank=args.rank, group_size=KITCHEN_GROUP_SIZE, scale_dtype=args.scale_dtype
+                    weight, rank=rank, group_size=KITCHEN_GROUP_SIZE, scale_dtype=args.scale_dtype
                 ).to_dict()
             for nk in NAT_KEYS:
                 out[f"{prefix}.{nk}"] = nat[nk].detach().cpu()
@@ -114,6 +128,10 @@ def main():
             if k.endswith(".weight") and v.dim() == 2:
                 kept_high.append((k, tuple(v.shape)))
 
+    print(
+        f"calibrated={bool(args.calibrated)} rank={rank} "
+        f"scale_dtype={args.scale_dtype} lowrank_branch_input_basis={args.lowrank_branch_input_basis}"
+    )
     print(f"quantized 2D linears -> int4: {quantized}")
     print("kept-high 2D linears:")
     for k, s in kept_high:
