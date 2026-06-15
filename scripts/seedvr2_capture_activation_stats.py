@@ -126,7 +126,7 @@ def _register_hooks(model_patcher, targets: dict[str, tuple[int, int]], accumula
     return hooks
 
 
-async def _execute_prompt(prompt: dict, outputs: list[str]):
+def _execute_prompt(prompt: dict, outputs: list[str]):
     import execution
 
     executor = execution.PromptExecutor(_ServerStub(), cache_type=execution.CacheType.NONE)
@@ -156,12 +156,21 @@ def main() -> int:
     # Hide script arguments from ComfyUI's global cli parser before importing it.
     sys.argv = [sys.argv[0], "--base-directory", str(comfy_root), "--disable-all-custom-nodes"]
 
+    script_dir = str(Path(__file__).resolve().parent)
+    for path in (str(_SRC), script_dir):
+        while path in sys.path:
+            sys.path.remove(path)
+    sys.path.insert(0, str(comfy_root))
+    loaded_utils = sys.modules.get("utils")
+    if loaded_utils is not None and not str(getattr(loaded_utils, "__file__", "")).startswith(str(comfy_root)):
+        sys.modules.pop("utils", None)
+
     import folder_paths
     import nodes
 
     folder_paths.set_output_directory(str(args.out.parent / "comfy_output"))
     folder_paths.set_temp_directory(str(args.out.parent / "comfy_temp"))
-    asyncio.run(nodes.init_extra_nodes(init_custom_nodes=False, init_api_nodes=True))
+    asyncio.run(nodes.init_extra_nodes(init_custom_nodes=False, init_api_nodes=False))
 
     original_load_unet = nodes.UNETLoader.load_unet
     accumulators: dict[str, _OnlineAmax] = {}
@@ -175,7 +184,7 @@ def main() -> int:
     nodes.UNETLoader.load_unet = wrapped_load_unet
     try:
         output_nodes = [node_id for node_id, node in prompt.items() if node.get("class_type") == "SaveImage"]
-        asyncio.run(_execute_prompt(prompt, output_nodes))
+        _execute_prompt(prompt, output_nodes)
     finally:
         nodes.UNETLoader.load_unet = original_load_unet
         for hook in hooks:
