@@ -72,6 +72,7 @@ def main():
         help="Store proj_down for raw activations by default, matching ComfyUI's SVDQuant runtime.",
     )
     ap.add_argument("--scale-dtype", default="bfloat16", choices=["bfloat16", "float16", "source"])
+    ap.add_argument("--quant-device", default="cpu", help="device for per-layer quantization")
     ap.add_argument("--device", default="cpu", help="tile-pack device")
     args = ap.parse_args()
 
@@ -86,12 +87,14 @@ def main():
         v = f.get_tensor(k)
         if should_quantize(k, tuple(v.shape)):
             prefix = k[: -len(".weight")]
+            weight = v.to(args.quant_device)
             if args.calibrated:
                 if prefix not in activation_stats:
                     raise KeyError(f"missing activation stats for {prefix}")
+                layer_stats = activation_stats[prefix].to(device=args.quant_device)
                 nat = quantize_linear_weight_to_calibrated_natural_svdquant(
-                    v,
-                    activation_stats=activation_stats[prefix],
+                    weight,
+                    activation_stats=layer_stats,
                     rank=args.rank,
                     group_size=KITCHEN_GROUP_SIZE,
                     scale_dtype=args.scale_dtype,
@@ -100,10 +103,10 @@ def main():
                     nat["proj_down"] = fold_proj_down_for_raw_branch(nat["proj_down"], nat["smooth_factor"])
             else:
                 nat = quantize_linear_weight_to_natural_svdquant(
-                    v, rank=args.rank, group_size=KITCHEN_GROUP_SIZE, scale_dtype=args.scale_dtype
+                    weight, rank=args.rank, group_size=KITCHEN_GROUP_SIZE, scale_dtype=args.scale_dtype
                 ).to_dict()
             for nk in NAT_KEYS:
-                out[f"{prefix}.{nk}"] = nat[nk]
+                out[f"{prefix}.{nk}"] = nat[nk].detach().cpu()
             out[f"{prefix}.comfy_quant"] = patch_svdquant_comfy_quant()
             quantized += 1
         else:
