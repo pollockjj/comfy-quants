@@ -174,6 +174,7 @@ def main() -> int:
 
     folder_paths.set_output_directory(str(args.out.parent / "comfy_output"))
     folder_paths.set_temp_directory(str(args.out.parent / "comfy_temp"))
+    asyncio.run(nodes.load_custom_node(str(comfy_root / "comfy_extras/nodes_latent.py"), module_parent="comfy_extras"))
     asyncio.run(nodes.load_custom_node(str(comfy_root / "comfy_extras/nodes_post_processing.py"), module_parent="comfy_extras"))
     asyncio.run(nodes.load_custom_node(str(comfy_root / "comfy_extras/nodes_seedvr.py"), module_parent="comfy_extras"))
 
