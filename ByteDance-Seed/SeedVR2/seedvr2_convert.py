@@ -2,9 +2,10 @@
 """
 Convert ByteDance SeedVR2 checkpoints to ComfyUI safetensors.
 
-Each source tensor is cast to the target dtype and written to safetensors with the
-original key names (safetensors sorts keys; no metadata). DiT files additionally embed
-the fixed text conditioning (--cond) as positive_conditioning / negative_conditioning,
+Each source tensor is converted to the target precision and written to safetensors with
+the original key names (safetensors sorts keys; no metadata). NVFP4 jobs emit native
+ComfyUI quantized-weight keys for selected 2D Linear weights. DiT files additionally
+embed the fixed text conditioning (--cond) as positive_conditioning / negative_conditioning,
 copied through as-is (bf16).
 
 Precisions:
@@ -13,6 +14,8 @@ Precisions:
   fp8_e4m3fn_mixed_block35_fp16 float8_e4m3fn, but tensors under "blocks.35." kept float16
                                 (keeping the last DiT block in fp16 avoids line/tile
                                  artifacts on the 7B model)
+  nvfp4                         2D .weight tensors -> TensorCoreNVFP4Layout; everything
+                                else -> float16
 
 Examples:
   # 3B DiT -> fp16 and fp8, conditioning baked in (one load serves both jobs)
@@ -63,11 +66,13 @@ Outputs  ( sha256  file  <-  source.pth, precision [+ conditioning] ):
 import argparse
 import collections
 import hashlib
+import json
 
 import torch
 from safetensors.torch import save_file
 
 FP8 = torch.float8_e4m3fn
+NVFP4_LAYOUT = "TensorCoreNVFP4Layout"
 
 
 def sha256(path):
@@ -89,8 +94,31 @@ def load_state_dict(pth):
     raise SystemExit(f"Unrecognized checkpoint structure: {type(obj)}")
 
 
+def comfy_quant_tensor(format_name):
+    return torch.tensor(list(json.dumps({"format": format_name}).encode("utf-8")), dtype=torch.uint8)
+
+
+def should_quantize_nvfp4(k, v):
+    return k.endswith(".weight") and v.dim() == 2
+
+
+def quantize_nvfp4_weight(k, v):
+    try:
+        from comfy_kitchen.tensor import QuantizedTensor
+    except ImportError as e:
+        raise SystemExit("nvfp4 precision requires comfy-kitchen") from e
+
+    base = k[:-len(".weight")]
+    qt = QuantizedTensor.from_float(v.contiguous(), NVFP4_LAYOUT)
+    tensors = qt.state_dict(f"{base}.weight")
+    tensors[f"{base}.comfy_quant"] = comfy_quant_tensor("nvfp4")
+    return tensors
+
+
 def cast(sd, precision):
     out = {}
+    nvfp4_quantized = 0
+    nvfp4_kept_fp16 = 0
     for k, v in sd.items():
         if not torch.is_tensor(v):
             continue
@@ -100,8 +128,17 @@ def cast(sd, precision):
             out[k] = v.to(FP8)
         elif precision == "fp8_e4m3fn_mixed_block35_fp16":
             out[k] = v.to(torch.float16) if k.startswith("blocks.35.") else v.to(FP8)
+        elif precision == "nvfp4":
+            if should_quantize_nvfp4(k, v):
+                out.update(quantize_nvfp4_weight(k, v))
+                nvfp4_quantized += 1
+            else:
+                out[k] = v.to(torch.float16)
+                nvfp4_kept_fp16 += 1
         else:
             raise SystemExit(f"unknown precision: {precision}")
+    if precision == "nvfp4":
+        print(f"nvfp4 quantized_weights={nvfp4_quantized} kept_fp16={nvfp4_kept_fp16}")
     return out
 
 
