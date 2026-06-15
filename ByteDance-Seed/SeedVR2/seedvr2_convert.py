@@ -14,8 +14,9 @@ Precisions:
   fp8_e4m3fn_mixed_block35_fp16 float8_e4m3fn, but tensors under "blocks.35." kept float16
                                 (keeping the last DiT block in fp16 avoids line/tile
                                  artifacts on the 7B model)
-  nvfp4                         2D .weight tensors -> TensorCoreNVFP4Layout; everything
-                                else -> float16
+  nvfp4                         2D .weight tensors -> TensorCoreNVFP4Layout, but tensors
+                                under "blocks.35." kept float16 for 7B; everything else
+                                -> float16
 
 Examples:
   # 3B DiT -> fp16 and fp8, conditioning baked in (one load serves both jobs)
@@ -99,7 +100,7 @@ def comfy_quant_tensor(format_name):
 
 
 def should_quantize_nvfp4(k, v):
-    return k.endswith(".weight") and v.dim() == 2
+    return k.endswith(".weight") and v.dim() == 2 and not k.startswith("blocks.35.")
 
 
 def quantize_nvfp4_weight(k, v):
