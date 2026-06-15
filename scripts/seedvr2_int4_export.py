@@ -30,8 +30,13 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from comfy_quants.algorithms.int4_svdquant.weight_quant import (  # noqa: E402
+    quantize_linear_weight_to_calibrated_natural_svdquant,
     quantize_linear_weight_to_natural_svdquant,
 )
+from comfy_quants.algorithms.int4_svdquant.branch_basis import (  # noqa: E402
+    fold_proj_down_for_raw_branch,
+)
+from comfy_quants.algorithms.int4_svdquant.stats import load_activation_stats_map  # noqa: E402
 from comfy_quants.formats.kitchen_tilepack import (  # noqa: E402
     KITCHEN_BLOCK_N,
     KITCHEN_GROUP_SIZE,
@@ -58,9 +63,21 @@ def main():
     ap.add_argument("--src", required=True, help="SeedVR2 fp16/bf16 safetensors with conditioning baked")
     ap.add_argument("--out", required=True)
     ap.add_argument("--rank", type=int, default=32)
+    ap.add_argument("--activation-stats", help="SeedVR2 per-linear activation stats JSON for calibrated export")
+    ap.add_argument("--calibrated", action="store_true", help="Use calibrated SVDQuant instead of data-free natural SVDQuant")
+    ap.add_argument(
+        "--lowrank-branch-input-basis",
+        default="raw",
+        choices=["raw", "post_smoothing"],
+        help="Store proj_down for raw activations by default, matching ComfyUI's SVDQuant runtime.",
+    )
     ap.add_argument("--scale-dtype", default="bfloat16", choices=["bfloat16", "float16", "source"])
     ap.add_argument("--device", default="cpu", help="tile-pack device")
     args = ap.parse_args()
+
+    if args.calibrated and not args.activation_stats:
+        raise SystemExit("--calibrated requires --activation-stats")
+    activation_stats = load_activation_stats_map(args.activation_stats, device="cpu") if args.activation_stats else {}
 
     f = safe_open(args.src, framework="pt", device="cpu")
     out = {}
@@ -69,9 +86,22 @@ def main():
         v = f.get_tensor(k)
         if should_quantize(k, tuple(v.shape)):
             prefix = k[: -len(".weight")]
-            nat = quantize_linear_weight_to_natural_svdquant(
-                v, rank=args.rank, group_size=KITCHEN_GROUP_SIZE, scale_dtype=args.scale_dtype
-            ).to_dict()
+            if args.calibrated:
+                if prefix not in activation_stats:
+                    raise KeyError(f"missing activation stats for {prefix}")
+                nat = quantize_linear_weight_to_calibrated_natural_svdquant(
+                    v,
+                    activation_stats=activation_stats[prefix],
+                    rank=args.rank,
+                    group_size=KITCHEN_GROUP_SIZE,
+                    scale_dtype=args.scale_dtype,
+                ).to_dict()
+                if args.lowrank_branch_input_basis == "raw":
+                    nat["proj_down"] = fold_proj_down_for_raw_branch(nat["proj_down"], nat["smooth_factor"])
+            else:
+                nat = quantize_linear_weight_to_natural_svdquant(
+                    v, rank=args.rank, group_size=KITCHEN_GROUP_SIZE, scale_dtype=args.scale_dtype
+                ).to_dict()
             for nk in NAT_KEYS:
                 out[f"{prefix}.{nk}"] = nat[nk]
             out[f"{prefix}.comfy_quant"] = patch_svdquant_comfy_quant()
