@@ -177,6 +177,8 @@ def quantize_mxfp8_weight(k, v):
     base = k[:-len(".weight")]
     qt = QuantizedTensor.from_float(v.contiguous(), MXFP8_LAYOUT)
     tensors = qt.state_dict(f"{base}.weight")
+    scale_key = f"{base}.weight_scale"
+    tensors[scale_key] = tensors[scale_key].view(torch.uint8)
     tensors[f"{base}.comfy_quant"] = comfy_quant_tensor("mxfp8")
     return tensors
 
