@@ -16,7 +16,6 @@ AWQ W4A16 tensors for modulation layers.
 
 | Model family or flow | Command | Calibration/search | Output | Guide |
 | --- | --- | --- | --- | --- |
-| SeedVR2 calibrated ceiling | `scripts/seedvr2_int4_export.py --calibrated --rank 128` | per-linear `input_amax`; no GPTQ or output-error low-rank calibration | single `svdquant_w4a4` tile-pack checkpoint | [`seedvr2_int4_r128.md`](seedvr2_int4_r128.md) |
 | Qwen-Image-Edit-2511 one-step export | `comfy-quants qwen-image-edit-2511-int4` | DeepCompressor search/PTQ; default 128 calibration samples | single `svdquant_w4a4` tile-pack checkpoint | [`qwen_image_edit_2511_int4.md`](qwen_image_edit_2511_int4.md) |
 | Built-in solver flow | `comfy-quants quantize-int4` | optional activation stats and GPTQ Hessians | `svdquant_w4a4` tile-pack artifact | [`native_int4.md`](native_int4.md) |
 | Existing artifact tools | `comfy-quants inspect-int4`, `comfy-quants export-int4` | no calibration or search | JSON report or repacked tile-pack checkpoint | [`int4_tools.md`](int4_tools.md) |
