@@ -186,11 +186,11 @@ def quantize_mxfp8_weight(k, v):
 def cast(sd, precision):
     out = {}
     nvfp4_quantized = 0
-    nvfp4_kept_fp16 = 0
+    nvfp4_kept_fp16_tensors = 0
     nvfp4_kept_policy = 0
     nvfp4_kept_shape = 0
     mxfp8_quantized = 0
-    mxfp8_kept_fp16 = 0
+    mxfp8_kept_fp16_tensors = 0
     mxfp8_kept_policy = 0
     last_block_prefix = detect_last_block_prefix(sd)
     for k, v in sd.items():
@@ -208,7 +208,7 @@ def cast(sd, precision):
                 nvfp4_quantized += 1
             else:
                 out[k] = v.to(torch.float16)
-                nvfp4_kept_fp16 += 1
+                nvfp4_kept_fp16_tensors += 1
                 if k.endswith(".weight") and v.dim() == 2:
                     if not nvfp4_tensorcore_eligible(v):
                         nvfp4_kept_shape += 1
@@ -222,7 +222,7 @@ def cast(sd, precision):
                 mxfp8_quantized += 1
             else:
                 out[k] = v.to(torch.float16)
-                mxfp8_kept_fp16 += 1
+                mxfp8_kept_fp16_tensors += 1
                 if k.endswith(".weight") and v.dim() == 2:
                     if last_block_prefix and k.startswith(last_block_prefix):
                         mxfp8_kept_policy += 1
@@ -232,13 +232,13 @@ def cast(sd, precision):
             raise SystemExit(f"unknown precision: {precision}")
     if precision == "nvfp4":
         print(
-            f"nvfp4 quantized_weights={nvfp4_quantized} kept_fp16={nvfp4_kept_fp16} "
+            f"nvfp4 quantized_weights={nvfp4_quantized} kept_fp16_tensors={nvfp4_kept_fp16_tensors} "
             f"kept_policy={nvfp4_kept_policy} kept_shape={nvfp4_kept_shape} "
             f"last_block={last_block_prefix or 'none'}"
         )
     if precision == "mxfp8":
         print(
-            f"mxfp8 quantized_weights={mxfp8_quantized} kept_fp16={mxfp8_kept_fp16} "
+            f"mxfp8 quantized_weights={mxfp8_quantized} kept_fp16_tensors={mxfp8_kept_fp16_tensors} "
             f"kept_policy={mxfp8_kept_policy} last_block={last_block_prefix or 'none'}"
         )
     return out
