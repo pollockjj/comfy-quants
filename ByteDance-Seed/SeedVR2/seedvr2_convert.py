@@ -285,6 +285,7 @@ def main():
         dtypes = collections.Counter(str(sd[k].dtype) for k in tensor_keys)
         print(f"{len(tensor_keys)} tensors, dtypes={dict(dtypes)}")
 
+    mismatched = []
     for job in args.job:
         parts = job.split(":")
         precision, out = parts[0], parts[1]
@@ -296,6 +297,11 @@ def main():
         digest = sha256(out)
         verdict = "" if expected is None else ("  OK" if digest == expected else "  MISMATCH")
         print(f"{precision:30s} {digest}  {out}{verdict}")
+        if expected is not None and digest != expected:
+            mismatched.append(out)
+
+    if mismatched:
+        raise SystemExit(f"SHA256 mismatch: {', '.join(mismatched)}")
 
 
 if __name__ == "__main__":
