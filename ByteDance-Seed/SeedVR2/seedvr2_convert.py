@@ -36,6 +36,16 @@ Examples:
   # VAE (no conditioning)
   python seedvr2_convert.py --src ema_vae.pth --job fp16:ema_vae_fp16.safetensors
 
+  # 3B DiT -> NVFP4 and MXFP8 (ComfyUI-native quantized weights), conditioning baked in
+  python seedvr2_convert.py --src seedvr2_ema_3b.pth --cond pos_emb.pt,neg_emb.pt \
+      --job nvfp4:seedvr2_3b_nvfp4.safetensors \
+      --job mxfp8:seedvr2_3b_mxfp8.safetensors
+
+  # 7B DiT -> NVFP4 and MXFP8 (final block auto-detected and kept fp16)
+  python seedvr2_convert.py --src seedvr2_ema_7b.pth --cond pos_emb.pt,neg_emb.pt \
+      --job nvfp4:seedvr2_7b_nvfp4_mixed_block35_fp16.safetensors \
+      --job mxfp8:seedvr2_7b_mxfp8_mixed_block35_fp16.safetensors
+
 A job may carry an expected SHA256 (PRECISION:OUT:SHA256) to verify the written file.
 
 ==========================================================================================
@@ -67,6 +77,12 @@ Outputs  ( sha256  file  <-  source.pth, precision [+ conditioning] ):
   d89ac95ee1566dfc1ee50c6075a2bfe4028d811dd8751f584505de89ef5c4cf3  seedvr2_7b_fp8_e4m3fn_mixed_block35_fp16.safetensors  <- seedvr2_ema_7b.pth, fp8_e4m3fn_mixed_block35_fp16 + cond
   70823bca54b9c24eeb56e1c452697c7c2a430867e58db0e376c6e260f3a4489d  seedvr2_7b_sharp_fp16.safetensors  <- seedvr2_ema_7b_sharp.pth, fp16 + cond
   700ee64fe0859c3df3abfa40c89f3a16068651bf8c8e5294726b6369e7b0d1e3  seedvr2_7b_sharp_fp8_e4m3fn_mixed_block35_fp16.safetensors  <- seedvr2_ema_7b_sharp.pth, fp8_e4m3fn_mixed_block35_fp16 + cond
+  6acf15dca5bb83556d38b7c06a8e4402a87ef94d0010e974b464855c41eaba6a  seedvr2_3b_nvfp4.safetensors  <- seedvr2_ema_3b.pth, nvfp4 + cond
+  cf0d30d90a92424ce77f5836898be05ff5b8e8f731120a02d8642cff5ed4d87c  seedvr2_3b_mxfp8.safetensors  <- seedvr2_ema_3b.pth, mxfp8 + cond
+  0ee5d7c4c4aac94fd24e3b68bb6e977aa4c7526e83499e183434cf6cced05fae  seedvr2_7b_nvfp4_mixed_block35_fp16.safetensors  <- seedvr2_ema_7b.pth, nvfp4 + cond
+  a9fc925e2a8fd1a1615030e79151c39e0bd6c6f5fab14b454125d94c2497a85f  seedvr2_7b_mxfp8_mixed_block35_fp16.safetensors  <- seedvr2_ema_7b.pth, mxfp8 + cond
+  d5814e47c0b8cd968e0477e62a2e2663501c5fd1a2319f6dc8ba03efa35e0d56  seedvr2_7b_sharp_nvfp4_mixed_block35_fp16.safetensors  <- seedvr2_ema_7b_sharp.pth, nvfp4 + cond
+  8f8b98662fd6d1919d55b0646a6546b0e57262270264eac4d56f4d352660a4c6  seedvr2_7b_sharp_mxfp8_mixed_block35_fp16.safetensors  <- seedvr2_ema_7b_sharp.pth, mxfp8 + cond
 """
 import argparse
 import collections
